@@ -4,13 +4,13 @@ A local-first CLI for downloading YouTube captions and, when no matching track e
 
 ## Install on macOS or Linux
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and Git, then install the command from GitHub:
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then install the command from GitHub:
 
 ```bash
-uv tool install --from git+https://github.com/shubinlab/youtube-transcript.git@v0.1.0 youtube-transcript-local
+uv tool install git+https://github.com/shubinlab/youtube-transcript.git
 ```
 
-`uv` installs the Python CLI in an isolated tool environment. The application itself has no third-party Python runtime dependencies.
+`uv` installs the command in an isolated tool environment. This direct Git install does not need a separately named package or a release tag. The command follows the repository's default branch.
 
 To update or remove it:
 
@@ -18,6 +18,8 @@ To update or remove it:
 uv tool upgrade youtube-transcript-local
 uv tool uninstall youtube-transcript-local
 ```
+
+`youtube-transcript-local` is the internal distribution name used by `uv`; the command you run remains `youtube-transcript`.
 
 If the command is not on `PATH`, check `uv tool dir --bin` and add that directory to your shell's `PATH`.
 
