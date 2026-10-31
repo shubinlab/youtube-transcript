@@ -12,7 +12,9 @@ ROOT = Path(__file__).resolve().parent
 class InstallerTests(unittest.TestCase):
     def test_install_and_uninstall_work_without_asr_tools_or_model(self):
         python3 = shutil.which("python3")
+        bash = shutil.which("bash")
         self.assertIsNotNone(python3)
+        self.assertIsNotNone(bash)
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
             home = base / "home user"
@@ -34,7 +36,7 @@ class InstallerTests(unittest.TestCase):
             )
 
             installed = subprocess.run(
-                ["/usr/bin/bash", str(ROOT / "install.sh")],
+                [bash, str(ROOT / "install.sh")],
                 env=env,
                 capture_output=True,
                 text=True,
@@ -45,7 +47,7 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(target.resolve(), (ROOT / "youtube_transcript.py").resolve())
 
             removed = subprocess.run(
-                ["/usr/bin/bash", str(ROOT / "uninstall.sh")],
+                [bash, str(ROOT / "uninstall.sh")],
                 env=env,
                 capture_output=True,
                 text=True,

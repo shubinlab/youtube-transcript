@@ -151,7 +151,7 @@ class ModelTests(unittest.TestCase):
 
             multilingual = Path(folder) / "ggml-small.bin"
             multilingual.write_bytes(b"model")
-            self.assertEqual(resolve_model(str(multilingual)), multilingual)
+            self.assertEqual(resolve_model(str(multilingual)), multilingual.resolve())
 
 
 class CliCopyTests(unittest.TestCase):
