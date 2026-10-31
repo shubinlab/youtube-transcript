@@ -172,7 +172,7 @@ esac
         result = self.run_script("install.sh")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("points outside this package", result.stderr)
-        self.assertEqual(launcher.resolve(), external)
+        self.assertEqual(launcher.resolve(), external.resolve())
         self.assertNotIn("tool install", self.uv_log.read_text(encoding="utf-8"))
 
     def test_linux_without_glibc_227_stops_before_package_install(self):
