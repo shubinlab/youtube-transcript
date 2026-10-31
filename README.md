@@ -1,101 +1,112 @@
+<div align="center">
+
 # YouTube Transcript
 
-A local-first CLI for downloading YouTube captions and, when no matching track exists, transcribing audio locally with `whisper.cpp`.
+**Get the captions YouTube already has. Keep their timestamps and wording.**
 
-## Install on macOS or Linux
+If the requested original-language captions are unavailable, use an optional local Whisper fallback.
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then install the command from GitHub:
+[![CI](https://github.com/shubinlab/youtube-transcript/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/shubinlab/youtube-transcript/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/shubinlab/youtube-transcript)](LICENSE)
+[![Linux and macOS](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-16836b)](#compatibility)
 
-```bash
-uv tool install git+https://github.com/shubinlab/youtube-transcript.git
-```
+</div>
 
-`uv` installs the command in an isolated tool environment. This direct Git install does not need a separately named package or a release tag. The command follows the repository's default branch.
+## Install
 
-To update or remove it:
-
-```bash
-uv tool upgrade youtube-transcript-local
-uv tool uninstall youtube-transcript-local
-```
-
-`youtube-transcript-local` is the internal distribution name used by `uv`; the command you run remains `youtube-transcript`.
-
-If the command is not on `PATH`, check `uv tool dir --bin` and add that directory to your shell's `PATH`.
-
-The repository is released under the MIT license; see [LICENSE](LICENSE).
-
-### YouTube captions
-
-Install a current `yt-dlp` release. YouTube extraction also needs a supported JavaScript runtime and yt-dlp's EJS components; Deno 2 is the recommended runtime ([yt-dlp setup guide](https://github.com/yt-dlp/yt-dlp/wiki/EJS)). The current Homebrew `yt-dlp` formula installs Deno as a dependency ([formula](https://formulae.brew.sh/formula/yt-dlp)). On Linux, use a current official yt-dlp distribution or install `yt-dlp[default]` plus Deno.
-
-On macOS with Homebrew:
+One command installs the latest release and prepares the YouTube caption runtime. Existing supported runtimes are reused. Missing user-level components are downloaded only when needed; no system package manager or administrator access is used.
 
 ```bash
-brew install uv yt-dlp
+curl -fsSL https://raw.githubusercontent.com/shubinlab/youtube-transcript/main/install.sh | bash
 ```
 
-On Linux, install `uv`, a current `yt-dlp` with EJS support, and Deno 2 using your distribution's packages or the upstream installation guides. The `yt-dlp` executable and Deno must both be on `PATH`.
+The installer checks that the command starts and that YouTube-caption prerequisites are ready. It does not install speech-recognition tools or download model weights.
 
-### Optional local ASR fallback
-
-Local ASR is only needed when YouTube has no matching caption track, or when you explicitly request `--force-asr`. Install FFmpeg and `whisper-cli` from the [whisper.cpp project](https://github.com/ggml-org/whisper.cpp), then download a multilingual GGML model separately ([model setup](https://github.com/ggml-org/whisper.cpp#quick-start)). Model weights are not installed or uploaded by this tool.
-
-On macOS with Homebrew:
+To update to the latest release, run the same install command again. To remove the CLI:
 
 ```bash
-brew install ffmpeg whisper.cpp
+curl -fsSL https://raw.githubusercontent.com/shubinlab/youtube-transcript/main/uninstall.sh | bash
 ```
-
-Select a local model with `WHISPER_MODEL=/path/to/ggml-small.bin` or pass `--model`. English-only models ending in `.en.bin` are rejected for Russian transcription. On Linux, install FFmpeg and whisper.cpp using your distribution or build whisper.cpp from its official repository.
-
-### Install from a source checkout
-
-```bash
-git clone https://github.com/shubinlab/youtube-transcript.git
-cd youtube-transcript
-./install.sh
-```
-
-This creates a user-local symlink. Caption retrieval requires Python 3 and `yt-dlp`. Missing ASR tools or a model do not block installation; the ASR fallback reports what is missing when it is needed. Use `./uninstall.sh` to remove only the symlink.
 
 ## Use
 
 ```bash
-youtube-transcript 'https://www.youtube.com/live/VIDEO_ID'
-youtube-transcript -l en 'https://www.youtube.com/watch?v=VIDEO_ID' -o ./transcripts
+youtube-transcript 'https://www.youtube.com/watch?v=VIDEO_ID'
 ```
 
-The requested language defaults to Russian. The command prefers a manual YouTube track, then an original-language automatic track. It excludes live-chat and translated automatic tracks. If no suitable captions exist, it downloads the audio and runs local ASR.
-
-Each run writes:
-
-- `<video-id>.vtt`: the original timestamped caption track or local ASR output.
-- `<video-id>.transcript.json`: source type, requested and selected language, track or model, video/audio durations, cue range, coverage warning, tool versions and VTT hash.
-
-The raw VTT is retained as evidence. YouTube captions contain rolling, overlapping cues; this tool does not deduplicate or silently rewrite them. `--force-asr` creates an alternative local transcript, not a comparison report. Use a separate output directory to keep both versions:
+Russian is the default language. Choose another spoken language and an output folder with `-l` and `-o`:
 
 ```bash
-youtube-transcript --force-asr 'https://www.youtube.com/watch?v=VIDEO_ID' -o ./local-asr
+youtube-transcript -l en -o ./transcripts 'https://www.youtube.com/watch?v=VIDEO_ID'
 ```
 
-Disagreement between two ASR systems identifies passages to review; it does not establish which transcript is correct.
-
-Existing outputs are preserved. Use `--force` only when you intend to replace that video's VTT and metadata. Same-video runs are serialized.
-
-## Privacy and limitations
-
-- Caption and audio retrieval contact YouTube through `yt-dlp`.
-- ASR runs locally with `whisper-cli`; no audio or transcript is sent to a cloud ASR service.
-- This tool does not read browser cookies, authenticate to private videos, bypass access restrictions, translate captions, or identify speakers.
-- Automatic captions and local ASR can both be wrong. The JSON sidecar records provenance and basic timeline coverage; it does not measure recognition accuracy.
-- Active or upcoming live streams are rejected. Use an archived video.
-
-## Development
+Check readiness without contacting YouTube:
 
 ```bash
-python -m unittest discover -s . -p 'test_*.py' -v
-bash -n install.sh uninstall.sh
+youtube-transcript --check
 ```
 
-CI tests Python 3.10 and 3.14 on Linux and macOS. Tests use local fixtures and do not download media or model weights.
+## What it does
+
+<div align="center">
+
+<img src="assets/caption-flow.svg" alt="The tool checks YouTube captions first, preserves a matching original track, and uses local speech recognition only when captions are unavailable." width="760">
+
+</div>
+
+| Video has… | Result |
+| --- | --- |
+| A manual track in the requested language | Save that original track |
+| No manual track, but an original-language automatic track | Save that automatic track |
+| No matching track | Use local Whisper if it is installed and a multilingual model is available |
+
+Translated tracks and live chat are not treated as original speech. The tool does not rewrite, deduplicate, or merge YouTube's rolling caption cues.
+
+## Files created
+
+Each successful run creates two files in the output folder:
+
+| File | Contents |
+| --- | --- |
+| `<video-id>.vtt` | Original timestamped YouTube captions or local ASR output |
+| `<video-id>.transcript.json` | Source, language, duration, cue coverage, tool provenance, and VTT SHA-256 |
+
+Existing files are preserved. Add `--force` only when you intend to replace that video's files. Same-video runs are serialized to prevent mixed outputs.
+
+To compare local ASR with YouTube's captions, keep the result in a separate folder:
+
+```bash
+youtube-transcript --force-asr -o ./local-asr 'https://www.youtube.com/watch?v=VIDEO_ID'
+```
+
+Agreement between transcripts is a review signal, not proof of accuracy.
+
+## Compatibility
+
+| Platform | Caption retrieval | Local ASR |
+| --- | --- | --- |
+| Linux x86_64 / ARM64, glibc 2.27+ | Supported by the installer | Install FFmpeg, `whisper-cli`, and a multilingual model separately |
+| macOS Intel / Apple Silicon | Supported by the installer | Install FFmpeg, `whisper-cli`, and a multilingual model separately |
+| Windows | Not supported by this installer | Not tested |
+
+Use an archived YouTube video. Active and upcoming live streams are rejected. Network access is needed to retrieve captions or audio; local ASR itself does not upload media.
+
+## Optional local speech recognition
+
+Local ASR is used only when no suitable YouTube caption track exists, or when `--force-asr` is set. It requires FFmpeg, `whisper-cli`, and an existing multilingual Whisper model. The normal installer does not install these tools or download model weights.
+
+See [installation and recovery](docs/INSTALLING.md) for supported setup paths, diagnostics, and dependency details.
+
+## Privacy and limits
+
+- YouTube caption and audio retrieval use the installed downloader and contact YouTube.
+- Audio and transcripts stay local; this tool does not use a cloud ASR service.
+- The tool does not read browser cookies, authenticate to private videos, bypass access restrictions, translate captions, or identify speakers.
+- YouTube captions and local ASR can both be wrong. The metadata records provenance and timeline coverage, not recognition accuracy.
+
+## Project
+
+- [Changes](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
+- [MIT license](LICENSE)

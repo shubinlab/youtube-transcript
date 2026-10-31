@@ -5,13 +5,20 @@ import time
 import unittest
 import wave
 from argparse import Namespace
+from io import StringIO
 from pathlib import Path
 from subprocess import CompletedProcess
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from youtube_transcript import (
     TranscriptError,
+    _js_runtime_spec,
+    _version_at_least,
+    _yt_dlp_base,
+    _download_and_transcribe,
     build_parser,
+    check_environment,
     publish_outputs,
     resolve_model,
     select_track,
@@ -152,6 +159,58 @@ class ModelTests(unittest.TestCase):
             multilingual = Path(folder) / "ggml-small.bin"
             multilingual.write_bytes(b"model")
             self.assertEqual(resolve_model(str(multilingual)), multilingual.resolve())
+
+
+class RuntimeTests(unittest.TestCase):
+    def test_runtime_version_parser_handles_deno_and_node_formats(self):
+        with patch(
+            "youtube_transcript.subprocess.run",
+            side_effect=[
+                CompletedProcess([], 0, "deno 2.10.1 (stable)\n", ""),
+                CompletedProcess([], 0, "v22.11.0\n", ""),
+                CompletedProcess([], 0, "deno 2.2.9 (stable)\n", ""),
+            ],
+        ):
+            self.assertTrue(_version_at_least("deno", (2, 3)))
+            self.assertTrue(_version_at_least("node", (22, 0)))
+            self.assertIsNone(_version_at_least("deno", (2, 3)))
+
+    def test_deno_is_preferred_and_node_is_enabled_explicitly(self):
+        def version(path, minimum):
+            return {"/bin/deno": "2.4.0", "/bin/node": "v24.0.0"}.get(path)
+
+        with patch("youtube_transcript.shutil.which", side_effect=lambda name: f"/bin/{name}"), patch(
+            "youtube_transcript._version_at_least", side_effect=version
+        ):
+            self.assertEqual(_js_runtime_spec(), "deno:/bin/deno")
+            self.assertIn("--js-runtimes", _yt_dlp_base())
+
+        with patch(
+            "youtube_transcript.shutil.which",
+            side_effect=lambda name: "/bin/node" if name == "node" else None,
+        ), patch("youtube_transcript._version_at_least", return_value="v24.0.0"):
+            self.assertEqual(_js_runtime_spec(), "node:/bin/node")
+
+    def test_bundled_deno_is_used_when_no_system_runtime_exists(self):
+        package = SimpleNamespace(find_deno_bin=lambda: "/tool-env/deno")
+        with patch("youtube_transcript.shutil.which", return_value=None), patch(
+            "youtube_transcript._version_at_least", return_value="2.4.0"
+        ), patch.dict("sys.modules", {"deno": package}):
+            self.assertEqual(_js_runtime_spec(), "deno:/tool-env/deno")
+
+    def test_check_is_read_only_and_reports_asr_as_optional(self):
+        output = StringIO()
+        with patch("youtube_transcript._yt_dlp_version", return_value="test"), patch(
+            "youtube_transcript._js_runtime_spec", return_value="deno:/bin/deno"
+        ), patch("youtube_transcript._version_at_least", return_value="2.4.0"), patch(
+            "youtube_transcript.shutil.which", side_effect=lambda name: "/bin/deno" if name == "deno" else None
+        ), patch("youtube_transcript.resolve_model", side_effect=TranscriptError("missing")), patch(
+            "sys.stdout", output
+        ):
+            self.assertEqual(check_environment(), 0)
+        self.assertIn("YouTube captions", output.getvalue())
+        self.assertIn("Local speech recognition (optional)", output.getvalue())
+        self.assertIn("Multilingual model: not found", output.getvalue())
 
 
 class CliCopyTests(unittest.TestCase):
@@ -490,7 +549,7 @@ class RoutingTests(unittest.TestCase):
                 if "--dump-single-json" in command:
                     data = {"id": "abcdefghijk", "title": "sample", "duration": 60, "language": "ru"}
                     return CompletedProcess(command, 0, json.dumps(data), "")
-                if command[0] == "yt-dlp":
+                if "yt_dlp" in command:
                     template = command[command.index("-o") + 1]
                     Path(template.split("%(ext)s")[0] + "webm").write_bytes(b"audio")
                 elif command[0] == "ffmpeg":
@@ -504,7 +563,9 @@ class RoutingTests(unittest.TestCase):
                 return CompletedProcess(command, 0, "", "")
 
             with patch("youtube_transcript._run", side_effect=fake_run), patch(
-                "youtube_transcript._tool_version", return_value="test-version"
+                "youtube_transcript._yt_dlp_version", return_value="test-version"
+            ), patch("youtube_transcript._js_runtime_spec", return_value="deno:/test/deno"), patch(
+                "youtube_transcript.shutil.which", side_effect=lambda name: "/test/" + name
             ):
                 vtt, metadata_path, metadata = transcribe(args)
 
@@ -518,7 +579,7 @@ class RoutingTests(unittest.TestCase):
             self.assertEqual(whisper_command[whisper_command.index("-l") + 1], "ru")
             self.assertIn("-m", whisper_command)
             self.assertNotIn("-tr", whisper_command)
-            self.assertTrue(all("--ignore-config" in command for command in commands if command[0] == "yt-dlp"))
+            self.assertTrue(all("--ignore-config" in command for command in commands if "yt_dlp" in command))
 
     @staticmethod
     def write_wav(path, duration_seconds):
@@ -549,7 +610,7 @@ class RoutingTests(unittest.TestCase):
                 if "--dump-single-json" in command:
                     info = {"id": "abcdefghijk", "duration": 60, "language": "ru"}
                     return CompletedProcess(command, 0, json.dumps(info), "")
-                if command[0] == "yt-dlp":
+                if "yt_dlp" in command:
                     template = command[command.index("-o") + 1]
                     Path(template.split("%(ext)s")[0] + "webm").write_bytes(b"audio")
                 elif command[0] == "ffmpeg":
@@ -557,13 +618,26 @@ class RoutingTests(unittest.TestCase):
                 return CompletedProcess(command, 0, "", "")
 
             with patch("youtube_transcript._run", side_effect=fake_run), patch(
-                "youtube_transcript._tool_version", return_value="test-version"
+                "youtube_transcript._yt_dlp_version", return_value="test-version"
+            ), patch("youtube_transcript._js_runtime_spec", return_value="deno:/test/deno"), patch(
+                "youtube_transcript.shutil.which", side_effect=lambda name: "/test/" + name
             ):
                 with self.assertRaisesRegex(TranscriptError, "audio duration"):
                     transcribe(args)
 
             self.assertFalse(any(command[0] == "whisper-cli" for command in commands))
             self.assertFalse(list(output.glob("*.transcript.json")))
+
+    def test_missing_asr_tools_fail_before_audio_download(self):
+        with tempfile.TemporaryDirectory() as folder:
+            model = Path(folder) / "ggml-small.bin"
+            model.write_bytes(b"model")
+            with patch("youtube_transcript.shutil.which", return_value=None), patch(
+                "youtube_transcript._run"
+            ) as run:
+                with self.assertRaisesRegex(TranscriptError, "needs ffmpeg and whisper-cli"):
+                    _download_and_transcribe("https://youtu.be/abcdefghijk", "ru", model, Path(folder), 60)
+            run.assert_not_called()
 
     def test_metadata_failure_does_not_masquerade_as_missing_captions(self):
         with tempfile.TemporaryDirectory() as folder:

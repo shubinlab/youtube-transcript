@@ -1,18 +1,51 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P)
-bin_dir=${XDG_BIN_HOME:-"$HOME/.local/bin"}
-target="$bin_dir/youtube-transcript"
-
-if [[ ! -L "$target" ]]; then
-    printf 'No installed symlink found at %s\n' "$target"
-    exit 0
+uv_bin=$(command -v uv || true)
+if [[ -z "$uv_bin" ]]; then
+    for candidate in "${XDG_BIN_HOME:-$HOME/.local/bin}/uv" "$HOME/.local/bin/uv"; do
+        if [[ -x "$candidate" ]]; then
+            uv_bin=$candidate
+            break
+        fi
+    done
 fi
-target_source=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$target")
-if [[ "$target_source" != "$script_dir/youtube_transcript.py" ]]; then
-    printf 'Refusing to remove symlink that points elsewhere: %s\n' "$target" >&2
+if [[ -z "$uv_bin" ]]; then
+    printf 'youtube-transcript: the installation helper is missing; nothing was removed.\n' >&2
     exit 1
 fi
-rm "$target"
-printf 'Removed: %s\n' "$target"
+
+installed_tools=$("$uv_bin" tool list 2>/dev/null || true)
+if ! printf '%s\n' "$installed_tools" | grep -Eq '^youtube-transcript-local v'; then
+    printf 'youtube-transcript is not installed through the user-local installer.\n'
+    exit 0
+fi
+
+tool_bin=$("$uv_bin" tool dir --bin)
+launcher="$tool_bin/youtube-transcript"
+if [[ -e "$launcher" || -L "$launcher" ]]; then
+    if [[ ! -L "$launcher" ]]; then
+        printf 'youtube-transcript: command path is not a managed link; left it untouched.\n' >&2
+        exit 1
+    fi
+    link_target=$(readlink "$launcher")
+    case "$link_target" in
+        /*) ;;
+        *) link_target="$(dirname "$launcher")/$link_target" ;;
+    esac
+    link_parent=$(cd "$(dirname "$link_target")" 2>/dev/null && pwd -P) || {
+        printf 'youtube-transcript: command link is broken; left it untouched.\n' >&2
+        exit 1
+    }
+    managed_bin=$(cd "$("$uv_bin" tool dir)/youtube-transcript-local/bin" 2>/dev/null && pwd -P) || {
+        printf 'youtube-transcript: managed package directory is missing; left it untouched.\n' >&2
+        exit 1
+    }
+    if [[ "$link_parent" != "$managed_bin" || "${link_target##*/}" != "youtube-transcript" ]]; then
+        printf 'youtube-transcript: command link points outside the managed package; left it untouched.\n' >&2
+        exit 1
+    fi
+fi
+
+"$uv_bin" tool uninstall youtube-transcript-local >/dev/null
+printf 'Removed youtube-transcript. The shared download cache was left in place.\n'

@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  source-archive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Create source archive and checksum
+        run: |
+          mkdir -p dist
+          git archive --format=zip --prefix=youtube-transcript/ "$GITHUB_REF_NAME" \
+            -o dist/youtube-transcript-source.zip
+          sha256sum dist/youtube-transcript-source.zip \
+            | sed 's#dist/##' > dist/youtube-transcript-source.zip.sha256
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/youtube-transcript-source.zip \
+            dist/youtube-transcript-source.zip.sha256 \
+            --title "YouTube Transcript ${GITHUB_REF_NAME}" \
+            --generate-notes

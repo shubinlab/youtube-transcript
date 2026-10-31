@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "youtube-transcript-local"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local-first YouTube captions with an optional whisper.cpp fallback"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Shubin Lab" }]
@@ -18,11 +18,14 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
     "Topic :: Multimedia :: Sound/Audio :: Speech",
     "Topic :: Utilities",
 ]
-dependencies = []
+dependencies = ["yt-dlp[default]"]
+
+[project.optional-dependencies]
+js-runtime = ["deno>=2.3"]
 
 [project.scripts]
 youtube-transcript = "youtube_transcript:main"

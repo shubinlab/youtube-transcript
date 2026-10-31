@@ -223,8 +223,10 @@ def _run(args: list[str], label: str) -> subprocess.CompletedProcess:
 
 
 def _yt_dlp_base() -> list[str]:
-    return [
-        "yt-dlp",
+    command = [
+        sys.executable,
+        "-m",
+        "yt_dlp",
         "--ignore-config",
         "--no-playlist",
         "--socket-timeout",
@@ -234,6 +236,53 @@ def _yt_dlp_base() -> list[str]:
         "--fragment-retries",
         "2",
     ]
+    runtime = _js_runtime_spec()
+    if runtime:
+        command.extend(["--js-runtimes", runtime])
+    return command
+
+
+def _version_at_least(program: str, minimum: tuple[int, int]) -> str | None:
+    try:
+        result = subprocess.run([program, "--version"], text=True, capture_output=True, check=False)
+    except OSError:
+        return None
+    if result.returncode:
+        return None
+    output = (result.stdout or result.stderr).strip()
+    match = re.search(r"(?<!\d)(\d+)\.(\d+)(?:\.\d+)?", output)
+    if not match or (int(match.group(1)), int(match.group(2))) < minimum:
+        return None
+    return output.splitlines()[0][:120]
+
+
+def _js_runtime_spec() -> str | None:
+    """Return an explicit supported yt-dlp JS runtime, preferring Deno."""
+    deno_bin = shutil.which("deno")
+    if deno_bin and _version_at_least(deno_bin, (2, 3)):
+        return f"deno:{deno_bin}"
+
+    node_bin = shutil.which("node")
+    if node_bin and _version_at_least(node_bin, (22, 0)):
+        return f"node:{node_bin}"
+
+    try:
+        import deno as deno_package
+
+        deno_bin = deno_package.find_deno_bin()
+    except (ImportError, OSError, AttributeError):
+        return None
+    if deno_bin and _version_at_least(str(deno_bin), (2, 3)):
+        return f"deno:{deno_bin}"
+    return None
+
+
+def _yt_dlp_version() -> str | None:
+    try:
+        from yt_dlp.version import __version__
+    except ImportError:
+        return None
+    return str(__version__)
 
 
 def _safe_video_id(info: dict) -> str:
@@ -490,6 +539,15 @@ def _download_caption(url: str, track_kind: str, language: str, directory: Path)
 def _download_and_transcribe(
     url: str, language: str, model: Path, directory: Path, duration: float
 ) -> tuple[Path, float]:
+    missing = [program for program in ("ffmpeg", "whisper-cli") if not shutil.which(program)]
+    if missing:
+        names = " and ".join(missing)
+        raise TranscriptError(
+            f"No matching YouTube captions; local ASR needs {names}. "
+            "Install FFmpeg and whisper.cpp, then retry. See "
+            "https://github.com/shubinlab/youtube-transcript#optional-local-speech-recognition."
+        )
+
     audio_template = str(directory / "source.%(ext)s")
     _run(
         _yt_dlp_base()
@@ -558,6 +616,32 @@ def _tool_version(program: str) -> str | None:
         return None
     lines = (result.stdout or result.stderr).strip().splitlines()
     return lines[0][:120] if result.returncode == 0 and lines else None
+
+
+def check_environment() -> int:
+    """Print a read-only readiness report; local ASR remains optional."""
+    ytdlp_version = _yt_dlp_version()
+    runtime = _js_runtime_spec()
+    print("YouTube captions")
+    print(f"  Downloader: {'ready (' + ytdlp_version + ')' if ytdlp_version else 'missing'}")
+    if runtime:
+        runtime_name, runtime_path = runtime.split(":", 1)
+        minimum = (2, 3) if runtime_name == "deno" else (22, 0)
+        version = _version_at_least(runtime_path, minimum)
+        print(f"  JavaScript runtime: ready ({runtime_name} {version})")
+    else:
+        print("  JavaScript runtime: missing; rerun the installer to prepare captions")
+
+    print("Local speech recognition (optional)")
+    for program in ("ffmpeg", "whisper-cli"):
+        print(f"  {program}: {'found' if shutil.which(program) else 'missing'}")
+    try:
+        model = resolve_model()
+    except TranscriptError:
+        print("  Multilingual model: not found")
+    else:
+        print(f"  Multilingual model: found ({model})")
+    return 0 if ytdlp_version and runtime else 1
 
 
 def transcribe(args: argparse.Namespace) -> tuple[Path, Path, dict]:
@@ -638,7 +722,7 @@ def transcribe(args: argparse.Namespace) -> tuple[Path, Path, dict]:
             "tail_gap_seconds": round(tail_gap, 3),
             "coverage_warning": coverage_warning,
             "vtt_sha256": _sha256(raw_vtt),
-            "yt_dlp_version": _tool_version("yt-dlp"),
+            "yt_dlp_version": _yt_dlp_version(),
             "whisper_cli_version": _tool_version("whisper-cli") if source == "local_asr" else None,
         }
 
@@ -655,7 +739,8 @@ def transcribe(args: argparse.Namespace) -> tuple[Path, Path, dict]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Fetch YouTube captions or transcribe locally with whisper.cpp.")
-    parser.add_argument("url", help="YouTube video URL (archived videos only)")
+    parser.add_argument("url", nargs="?", help="YouTube video URL (archived videos only)")
+    parser.add_argument("--check", action="store_true", help="check caption and optional ASR components")
     parser.add_argument("-l", "--language", default="ru", help="spoken language code (default: ru)")
     parser.add_argument("-o", "--output", default=".", help="output directory (default: current directory)")
     parser.add_argument("--model", help="existing multilingual whisper.cpp model; no model is downloaded")
@@ -665,7 +750,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.check:
+        if args.url:
+            parser.error("--check cannot be combined with a video URL")
+        return check_environment()
+    if not args.url:
+        parser.error("a YouTube video URL is required (or use --check)")
     if not re.fullmatch(r"[A-Za-z0-9_-]{2,20}", args.language):
         print("Error: language must be a short language tag such as ru, en, or ru-RU", file=sys.stderr)
         return 2
